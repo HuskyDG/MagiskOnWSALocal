@@ -570,6 +570,8 @@ else
     exit 1
 fi
 
+sudo chmod +x "../linker/$HOST_ARCH/linker64" || abort
+
 if [ "$GAPPS_BRAND" != "none" ] || [ "$ROOT_SOL" = "magisk" ]; then
     echo "Extract Magisk"
     if [ -f "$MAGISK_PATH" ]; then
@@ -584,7 +586,6 @@ if [ "$GAPPS_BRAND" != "none" ] || [ "$ROOT_SOL" = "magisk" ]; then
         if [ "$MAGISK_VERSION_CODE" -lt 26000 ] && [ "$MAGISK_VER" != "stable" ] && [ -z ${CUSTOM_MAGISK+x} ]; then
             abort "Please install Magisk 26.0+"
         fi
-        sudo chmod +x "../linker/$HOST_ARCH/linker64" || abort
         sudo patchelf --set-interpreter "../linker/$HOST_ARCH/linker64" "$WORK_DIR/magisk/magiskpolicy" || abort
         chmod +x "$WORK_DIR/magisk/magiskpolicy" || abort
     elif [ -z "${CUSTOM_MAGISK+x}" ]; then
@@ -742,6 +743,21 @@ echo "Add device administration features"
 sudo sed -i -e '/cts/a \ \ \ \ <feature name="android.software.device_admin" />' -e '/print/i \ \ \ \ <feature name="android.software.managed_users" />' "$VENDOR_MNT/etc/permissions/windows.permissions.xml"
 sudo setfattr -n security.selinux -v "u:object_r:vendor_configs_file:s0" "$VENDOR_MNT/etc/permissions/windows.permissions.xml" || abort
 echo -e "done\n"
+
+echo "Integrate OverlayFS"
+sudo cp "../$ARCH/mount.overlayfs" "$ROOT_MNT/debug_ramdisk/"
+sudo setfattr -n security.selinux -v "u:object_r:magisk_file:s0" "$ROOT_MNT/debug_ramdisk/mount.overlayfs"
+sudo chmod 755 "$ROOT_MNT/debug_ramdisk/mount.overlayfs"
+sudo patchelf --set-interpreter "../linker/$HOST_ARCH/linker64" "../bin/$HOST_ARCH/magiskpolicy"
+sudo chmod +x "../bin/$HOST_ARCH/magiskpolicy"
+sudo LD_LIBRARY_PATH="../linker/$HOST_ARCH" "../bin/$HOST_ARCH/magiskpolicy" --load "$VENDOR_MNT/etc/selinux/precompiled_sepolicy" --save "$VENDOR_MNT/etc/selinux/precompiled_sepolicy" --magisk
+sudo tee -a "$SYSTEM_MNT/etc/init/hw/init.rc" <<EOF >/dev/null
+
+on post-fs-data
+    mkdir /data/overlayfs 700
+    exec u:r:magisk:s0 0 0 -- /debug_ramdisk/mount.overlayfs /data/overlayfs
+
+EOF
 
 if [ "$ROOT_SOL" = 'magisk' ]; then
     echo "Integrate Magisk"
